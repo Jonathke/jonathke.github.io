@@ -1,0 +1,34 @@
+<!doctype html>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex/dist/contrib/auto-render.min.js"></script>
+<html>
+  <head>
+    <title>Jonathan Komada Eriksen - Notes</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body style="background-color:#65ffb2;">
+    <nav>
+      <script src="navbar.js"></script>
+    </nav>
+    <main>
+      <header>
+        <h1>Notes</h1>
+      </header>
+      Something like a blog...
+      <div id="markdown-content"></div>
+      <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <script>
+            $(document).ready(function() {
+                $.get('./shipwrecked.md', function(data) {
+                    var markdownContent = marked(data, { breaks: true }); // Parse Markdown
+                    $('#markdown-content').html(markdownContent); // Insert parsed Markdown
+                    renderMathInElement(document.getElementById('markdown-content')); // Render math with KaTeX
+                });
+            });
+      </script>
+  </main>
+
+  </body>
+</html>
