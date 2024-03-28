@@ -12,6 +12,7 @@ body {
   color: black;
   display: flex;
   flex-direction: row;
+  text-align: justify;
 }
 
 
