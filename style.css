@@ -46,3 +46,13 @@ a {
 }
 
 .object-list > li { margin-bottom: 1ex; }
+
+img {
+  width: 50%; /* or a specific width */
+}
+
+.container {
+  text-align: center;
+  width: 100%; /* Set to your desired width */
+  max-width: 50em;
+}

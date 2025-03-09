@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Jonathan Komada Eriksen - Notes</title> 
+    <!-- Prism.js for syntax highlighting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.25.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.25.0/components/prism-python.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prism-themes/themes/prism-xonokai.css">
+    <!-- marked library for parsing Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- MathJax script for rendering math expressions -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>   
+  <link rel="stylesheet" href="style.css">
+  <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$']]
+      }
+    };
+  </script>
+  
+</head>
+<body style="background-color:#9affcc;">
+  <nav>
+    <script src="navbar.js"></script>
+  </nav>
+  <main>
+    <header>
+      <h1>Adjoints</h1>
+    </header>
+    Something like a <a href="./blog">blog</a>...
+<hr>
+<h2>MonoDOOM - Exploiting Projective Coordinate Leaks with Damien Robert's Incredible Monodromy Attack</h2>
+<p>For KalmarCTF 2025 I authored two challenges - one quite hard and one quite easy. This blogpost covers the harder one - MonoDOOM. In the end it got 8 solves, so quite hard, but clearly not impossible.</p>
+<h3>The challenge</h3>
+<p>The challenge has the scary description</p>
+<blockquote>
+<p>I have to read Grothendieck's SGA to solve crypto challs now?!</p>
+</blockquote>
+<p>which probably either peaks your interest or does the exact opposite based on your mathematical interests. Assuming the former, we can download the challenge files, and we are presented with the following:</p>
+<pre><code class="language-python">from sage.all import *
+
+FLAG = b&quot;kalmar{???}&quot;
+
+#Formulae from https://www.hyperelliptic.org/EFD/g1p/auto-montgom-xz.html
+#dbl-1987-m-3
+def double(a24, P):
+    X1, Z1 = P
+
+    A = X1+Z1
+    AA = A*A
+    B = X1-Z1
+    BB = B*B
+    C = AA-BB
+    X3 = AA*BB
+    Z3 = C*(BB+a24*C)
+
+    return (X3, Z3)
+
+#dadd-1987-m-3
+def diff_add(P, Q, PmQ):
+    X2, Z2 = P
+    X3, Z3 = Q
+    X1, Z1 = PmQ
+
+    A = X2+Z2
+    B = X2-Z2
+    C = X3+Z3
+    D = X3-Z3
+    DA = D*A
+    CB = C*B
+    X5 = Z1*(DA+CB)**2
+    Z5 = X1*(DA-CB)**2
+    return (X5, Z5)
+
+def ladder(a24, P, n):
+    n = abs(n)
+    P1, P2 = (1, 0), P
+    if n == 0:
+        return P1, P2
+    for bit in bin(n)[2:]:
+        Q = diff_add(P2, P1, P)
+        if bit == "1":
+            P2 = double(a24, P2)
+            P1 = Q
+        else:
+            P1 = double(a24, P1)
+            P2 = Q
+    return P1
+
+def keygen(A, G, ord_G):
+    s = randint(1, ord_G)
+    a24 = (A + 2)/4
+    P = ladder(a24, G, s)
+    return s, P
+
+def derive_secret(A, Pub, sk):
+    a24 = (A + 2)/4
+    R = ladder(a24, Pub, sk)
+    return int(R[0]/R[1])
+</code></pre>
+<p>Checking the link provided in the comment, we see that it leads to to formulae for XZ-coordinates on montgomery curves. This is a standard thing in ECC - It means that for the montgomery curve
+$$
+E_A : y^2 = x^3 + Ax^2 + x,
+$$
+a point $P = (x,y)$ is represented by the tuple $(X, Z)$, where $x = X/Z$ (formally, this is often referred to as working on the &quot;Kummer line&quot; $E/\pm 1 \simeq \mathbb{P}^1$).
+Forgetting about formalities, we can anyway verify that the double and diff_add functions are seemingly standard, and correctly implemented.</p>
+<p>For the rest of the code, we see</p>
+<pre><code class="language-python">if __name__==&quot;__main__&quot;:
+    p = 340824640496360275329125187555879171429601544029719477817787
+    F = GF(p)
+    A = F(285261811835788437932082156343256480312664037202203048186662)
+    ord_G = 42603080062045034416140648444405950943345472415479119301079
+
+    G = (F(2024), F(1))
+
+    s_A, p_A = keygen(A, G, ord_G)
+    print(f&quot;Alice sending Bob...\n{p_A}&quot;)
+
+    s_B, p_B = keygen(A, G, ord_G)
+    print(f&quot;Bob sending Alice...\n{p_B}&quot;)
+
+    ss_A = derive_secret(A, p_B, s_A)
+    ss_B = derive_secret(A, p_A, s_B)
+
+    assert ss_A == ss_B
+
+    def encrypt_flag(shared_secret):
+        #AES-CBC encrypt the flag
+        return iv.hex(), ciphertext.hex()
+
+    print(encrypt_flag(ss_A))
+</code></pre>
+<p>Although the curve and prime looks non-standard, this otherwise looks extremely not suspicious so far. We can take a look at the output, and see</p>
+<pre><code class="language-bash">Alice sending Bob...
+(209857742520608467581271396064802876586374921499872855371645, 121663501921569046032156869406289097745191007032095282690267)
+Bob sending Alice...
+(333277706664672606095099199605163281441405663102971131524642, 74290998611431480800763772198569850611128494340151848588434)
+('46abd1dcd085b93d15340b1666532029', '3559d472d94b64a5a9c0638858a9d7248d5d480c28dc26c07528295a5197a58288f12bab27d6f1d1c22f6933279e50274c59db965c2e97ca4155308ad10261e23f9eedcaa9cd0a27ca70625990c9ffb59dca7ecaf5a5f28ee2be0432ea61f581')
+</code></pre>
+<p>And here we realise possibly the first suspicious thing: Since the curve was using XZ-coordinates, these values sent are not your typical (x, y)-coordinates, but rather they represent the x-value X/Z. The fact that we get both X and Z is suspicious, but surely cannot be enough??</p>
+<p>Googling a bit for papers on projective coordinate leaks, might lead to this classical attack by <a href="https://link.springer.com/chapter/10.1007/978-3-540-24676-3_16">Naccache, Smart and Stern</a></p>
+<p>However, it quickly becomes clear that this attack is only enough to recover a few bits of the secret scalar...</p>
+<h3>The misc part of the challenge</h3>
+<p>At this point, it will be an advantage to show some street-smartness (sorry to everyone who hates these &quot;guessy&quot; parts). Indeed, the prime and curve seems non-standard, and the generator used is suspiciously of the form</p>
+<pre><code class="language-python">G = (F(2024), F(1))
+</code></pre>
+<p>Now, remember, this is again XZ-coordinates. What happens if we compute the corresponding y-coordinate? Well, there are (most likely) two of them, and using sage, we can compute the two possible lifts of $G$ as
+$$G = (2024, \pm517)$$
+Now 517 is an extremely suspiciously number in this case, and is clearly meant as a hint. Guessing that this maybe refers to a paper, we check out the <a href="https://eprint.iacr.org/2024/517">eprint</a>:</p>
+<p>
+    <div class="container">
+        <img src="./files/eprint.png" alt="eprint" title="eprint">
+    </div>
+</p>
+<p>Although this at first glance seems to be a paper about computing pairings which seems quite far from what we need, it does say that</p>
+<blockquote>
+<p>Reinterpret the usual Weil, etc. as monodromy pairings</p>
+</blockquote>
+<p>Could this be related to the name of the challenge?! If we keep reading, and make it all the way to page 4, the first references to Grothendieck SGA7 starts ticking in, and we should be convinced that this paper is relevant to the challenge. If we keep reading, we find at page 7 under &quot;1.5 applications&quot;</p>
+<blockquote>
+<p>... some further applications: ..., ..., ..., and a novel side channel attack which I call the monodromy leak.</p>
+</blockquote>
+<p>Could this be it? Jumping over 70 pages, to section 6.4 it quickly becomes clear that this attack is exactly what we want (and honestly sounds almost too good to be true)! Following some of the references, we see that Damien (the author) has even implemented the attack, so we follow that <a href="https://gitlab.inria.fr/roberdam/kummer-line">link</a>.</p>
+<h3>The attack</h3>
+<p>Honestly, the attack uses so much cool, but also involved theory, that I cannot really say I understand it fully. I'll give my understanding of the attack (although it is really not doing it justice!). If you are only interested in seeing the final script to win, you can skip this section.</p>
+<p>There are five main things to understand:</p>
+<ul>
+<li><p>There exists a notion of a &quot;cubical point&quot; $\tilde{P}$. The exact definition of a cubical point is <em><strong>*mumbles something incomprehensible about line bundles*</strong></em>, but we can think of it as a point $P \in E$, and some &quot;extra data&quot;. If we are given $P$ in projective coordinates $P = (X : Y : Z)$, we know that this is understood up to simultanious multiplication by a non-zero element, i.e. the tuple $(\lambda X : \lambda Y : \lambda Z)$ really defines the same point for $\lambda \neq 0$. And as it turns out, one way to represent this &quot;extra data&quot; in $\tilde{P}$ is precisly by <strong>choice</strong> of such projective coordinates. This will be called the &quot;affine representation of the cubical point&quot; from now on.</p>
+</li>
+<li><p>Cubical points don't have a typical arithmetic defined to them, i.e. we can't senisbly define $\tilde{P} + \tilde{Q}$. However, one can define something called &quot;cubical arithmetic&quot;, and it turns out that doubling and differential addition are special cases of cubical arithmetic.</p>
+</li>
+<li><p>The formula for cubical doubling when using the affine representation coincides with the usual Montgomery doubling, and the formula for differential addition <em>almost</em> coincides.</p>
+</li>
+<li><p>Assume we have two distinct cubical points (on the kummer line!) in affine representation $\tilde{P} = (X, Z)$ and $\widehat{P} = (\lambda X, \lambda Z)$.
+Then if $[m]\tilde{P} = (X', Z')$ (where the scalar multiplication comes from cubical arithmetic!), we also have $[m]\widehat{P} = (\lambda^{(m^2)} X', \lambda^{(m^2)} Z')$</p>
+</li>
+<li><p>Let $\ell$ be the order of $P$. In this particular case, where $\ell$ is coprime to $p-1$, we have a unique choice of cubical point $\widehat{P}$ &quot;which is still of $\ell$-torsion&quot;, meaning that $[\ell]\widehat{P} = \tilde{0}$ for some fixed cubical point $\tilde{0}$ above the neutral element on $E$ (in general, $[\ell]\tilde{P}$ will be a cubical point above $0$, but not necessarily the cubical point $\tilde{0}$). Further, this point is easy to compute.</p>
+</li>
+</ul>
+<p>Pretending for a sec that the formulae for differential addtiion really coincides, we can already describe the attack quite easily: In this case the ladder really computes the cubical scalar multiplication $[m]\tilde{G}$, thus we can assume that we are given $\tilde{G}, [m]\tilde{G}$. This gives the following approach to solve:</p>
+<ul>
+<li>Compute the canonical cubical point of $\ell$-torsion $\widehat{G}$. Compute $\lambda = Z(\tilde{G})/Z(\widehat{G}) = 1/Z(\widehat{G})$.</li>
+<li>Similarily, compute the canonical $\widehat{[m]G}$, and $\lambda' = Z([m]\tilde{G})/Z(\widehat{[m]G})$</li>
+<li>By the above discussion, recover $m^2$ as the discrete log of $\lambda'$ to the base $\lambda$ (this is now a discrete log in $\mathbb{F}_p$ instead, which is way easier than on the curve of course!), and then $m$ is one square roots mod $p-1$ of this value.</li>
+</ul>
+<p>Now the last point is that this attack only worked if the differential addition coincides, which it does not. Luckily, Damien has already solved this part for us, and shown how the attack then essentially still reduces to a few dlps in $\mathbb{F}_p$, and solving a quadratic equation modulo $p-1$, assuming we know the bit-length of $m$.</p>
+<h3>Full Solve Script</h3>
+<p>In fact, there is not that much adapting we need to do to Damien's original script to get it to work on our instance. Factoring $p-1$ gives</p>
+<pre><code class="language-python">p - 1 = 2 * 37 * 7793729 * 12033323 * 13421363 * 13580981 * 19281649 * 19285337 * 24502909 * 29570017
+</code></pre>
+<p>which certainly looks like something its easy to solve dlp's in. Adapting Damien's script to search through all the possible solutions, for all the possible bit lengths of $m$, we get the final solve script:</p>
+<pre><code class="language-python">from sage.all import *
+from chal import ladder, double, derive_secret
+import itertools
+
+# this is the correct differential addition from the cubical torsor point of view
+def cubical_diff_add(P, Q, PmQ):
+    XP, ZP = P
+    XQ, ZQ = Q
+    XPmQ, ZPmQ = PmQ
+    a=XP+ZP
+    b=XP-ZP
+    c=XQ+ZQ
+    d=XQ-ZQ
+    da = d*a
+    cb = c*b
+    dapcb = da+cb
+    damcb = da-cb
+    XPQ=dapcb*dapcb / XPmQ
+    ZPQ=damcb*damcb / ZPmQ
+    return (XPQ/4, ZPQ/4)
+
+# the cubical ladder will be used to compute our canonical lift
+def cubical_ladder(A24, P, n):
+    n = abs(n)
+    P1, P2 = (1, 0), P
+    if n == 0:
+        return P1, P2
+    for bit in bin(n)[2:]:
+        Q = cubical_diff_add(P2, P1, P)
+        if bit == &quot;1&quot;:
+            P2 = double(A24, P2)
+            P1 = Q
+        else:
+            P1 = double(A24, P1)
+            P2 = Q
+    return P1
+
+def ratio(P, Q):
+    XP, ZP = P
+    XQ, ZQ = Q
+    if XP == 0:
+        assert XQ == 0
+        return (ZQ/ZP)
+    else:
+        l=XQ/XP
+        assert (ZQ == l*ZP)
+        return l
+
+def monodromy_atk(F, ordG, A, G, P):
+
+    for l in range(195, 1, -1):
+        print(f&quot;Trying bitlength l = {l}&quot;)
+        p = F.characteristic()
+        A24=(A+2)/4
+
+        xG = G[0]
+
+        u = crt([0,1], [p-1, ordG])
+        Gthilde = cubical_ladder(A24, G, u) # &quot;Canonical lift&quot;
+        Pthilde = cubical_ladder(A24, P, u) # &quot;Canonical lift&quot;
+
+        l1 = ratio(Gthilde, G)
+        l2 = ratio(Pthilde, P)
+
+        zeta = F.multiplicative_generator()
+        print(&quot;Solving dlogs&quot;)
+        print(factor(p-1))
+        #dlp_x = Mod((4*xG).log(zeta),p-1)
+        dlp_x = (4*xG).log(zeta)
+        print(&quot;Done&quot;)
+        dlp_l2 = Mod(l2.log(zeta),p-1)
+        print(&quot;Done&quot;)
+        dlp_l1 = Mod(l1.log(zeta),p-1)
+        print(&quot;Done&quot;)
+
+        #assert dlp_x*m*(2**l-m)+dlp_l1*m**2 == dlp_l2
+
+        crt_mods = []
+        crt_ins = []
+
+        wrong_bitlen = False
+        for ell, e in factor(p-1):
+            print(f&quot;Doing factor: {ell, e}&quot;)
+            #if ell == 2: #Skip 2 because annoying
+            #    continue
+            R = Integers(ell**e)[&quot;X&quot;]
+            X=R.gen()
+            
+            f = X**2*(dlp_l1-dlp_x)+2**l*dlp_x*X - dlp_l2
+            #print(ell, e)
+            #print(dlp_l1, dlp_x, dlp_l2)
+            if f.degree() == -1:
+                crt_ins.append([Integer(a) for a in range(ell**e)])
+            else:
+                rts = [Integer(r) for r in f.roots(multiplicities=False)]
+                if len(rts) == 0:
+                    wrong_bitlen = True
+                    continue
+                assert len(rts) &gt; 0
+                crt_ins.append(rts)
+            crt_mods.append(ell**e)
+
+        if wrong_bitlen:
+            continue
+        
+        for comb in itertools.product(*crt_ins):
+            try:
+                rec_m = crt(list(comb), crt_mods)
+            except:
+                break
+            print(rec_m)
+            rec_P = ladder(A24, G, rec_m)
+            if rec_P[0]/rec_P[1] == P[0]/P[1]:
+                print(&quot;FOUND!!!&quot;)
+                return rec_m
+        
+    assert False, &quot;Didnt work :c&quot;
+
+p = 340824640496360275329125187555879171429601544029719477817787
+F = GF(p)
+A = F(285261811835788437932082156343256480312664037202203048186662)
+            
+G = (F(2024), F(1))
+ord_G = 42603080062045034416140648444405950943345472415479119301079
+
+from ast import literal_eval
+
+with open(&quot;output.txt&quot;, &quot;r&quot;) as f:
+    f.readline()
+    p_A = [F(c) for c in literal_eval(f.readline())]
+    f.readline()
+    p_B = [F(c) for c in literal_eval(f.readline())]
+    iv, ct = literal_eval(f.readline())
+
+print(p_A)
+s_A = monodromy_atk(F, ord_G, A, G, p_A)
+
+ss = derive_secret(A, p_B, s_A)
+
+import hashlib
+import os
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+
+sha1 = hashlib.sha1()
+sha1.update(str(ss).encode('ascii'))
+key = sha1.digest()[:16]
+cipher = AES.new(key, AES.MODE_CBC, bytes.fromhex(iv))
+print(unpad(cipher.decrypt(bytes.fromhex(ct)), 16))
+</code></pre>
+<p>which finds in a few seconds</p>
+<pre><code class="language-bash">kalmar{M0r3_m0nodr0mi3s_at_https://web.archive.org/web/20100418003820/http://monodromy.com:80/}
+</code></pre>
+<p>The flags points to the amazing (webarchived) website that Wouter Castryck showed me:</p>
+<p>
+    <div class="container">
+        <img src="./files/monodromy_website.png" alt="monodromy" title="monodromy">
+    </div>
+</p>
+<p>which in addition to being hilarious has some good sources for further reading too!</p>
+</main>
+</body>
+</html>
