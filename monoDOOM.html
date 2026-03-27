@@ -191,6 +191,7 @@ Then if $[m]\tilde{P} = (X', Z')$ (where the scalar multiplication comes from cu
 <pre><code class="language-python">p - 1 = 2 * 37 * 7793729 * 12033323 * 13421363 * 13580981 * 19281649 * 19285337 * 24502909 * 29570017
 </code></pre>
 <p>which certainly looks like something its easy to solve dlp's in. Adapting Damien's script to search through all the possible solutions, for all the possible bit lengths of $m$, we get the final solve script:</p>
+
 <pre><code class="language-python">from sage.all import *
 from chal import ladder, double, derive_secret
 import itertools
@@ -239,74 +240,65 @@ def ratio(P, Q):
         assert (ZQ == l*ZP)
         return l
 
-def monodromy_atk(F, ordG, A, G, P):
+def monodromy_atk(F, ell, A, G, P):
+    p = F.characteristic()
+    A24=(A+2)/4
 
-    for l in range(195, 1, -1):
-        print(f&quot;Trying bitlength l = {l}&quot;)
-        p = F.characteristic()
-        A24=(A+2)/4
+    xG = G[0]
 
-        xG = G[0]
+    u = crt([0,1], [p-1, ell])
+    Gthilde = cubical_ladder(A24, G, u) # &quot;Canonical lift&quot;
+    Pthilde = cubical_ladder(A24, P, u) # &quot;Canonical lift&quot;
 
-        u = crt([0,1], [p-1, ordG])
-        Gthilde = cubical_ladder(A24, G, u) # &quot;Canonical lift&quot;
-        Pthilde = cubical_ladder(A24, P, u) # &quot;Canonical lift&quot;
+    l1 = ratio(Gthilde, G)
+    l2 = ratio(Pthilde, P)
 
-        l1 = ratio(Gthilde, G)
-        l2 = ratio(Pthilde, P)
+    zeta = F.multiplicative_generator()
+    print(&quot;Solving dlogs&quot;)
+    print(factor(p-1))
+    #dlp_x = Mod((4*xG).log(zeta),p-1)
+    dlp_x = (4*xG).log(zeta)
+    print(&quot;Done&quot;)
+    dlp_l2 = Mod(l2.log(zeta),p-1)
+    print(&quot;Done&quot;)
+    dlp_l1 = Mod(l1.log(zeta),p-1)
+    print(&quot;Done&quot;)
 
-        zeta = F.multiplicative_generator()
-        print(&quot;Solving dlogs&quot;)
-        print(factor(p-1))
-        #dlp_x = Mod((4*xG).log(zeta),p-1)
-        dlp_x = (4*xG).log(zeta)
-        print(&quot;Done&quot;)
-        dlp_l2 = Mod(l2.log(zeta),p-1)
-        print(&quot;Done&quot;)
-        dlp_l1 = Mod(l1.log(zeta),p-1)
-        print(&quot;Done&quot;)
-
-        #assert dlp_x*m*(2**l-m)+dlp_l1*m**2 == dlp_l2
-
+    # l = len(bin(ord_G)) - k for small k
+    for l in range(196, 1, -1):
         crt_mods = []
         crt_ins = []
 
         wrong_bitlen = False
         for ell, e in factor(p-1):
             print(f&quot;Doing factor: {ell, e}&quot;)
-            #if ell == 2: #Skip 2 because annoying
-            #    continue
             R = Integers(ell**e)[&quot;X&quot;]
             X=R.gen()
             
             f = X**2*(dlp_l1-dlp_x)+2**l*dlp_x*X - dlp_l2
-            #print(ell, e)
-            #print(dlp_l1, dlp_x, dlp_l2)
             if f.degree() == -1:
                 crt_ins.append([Integer(a) for a in range(ell**e)])
             else:
                 rts = [Integer(r) for r in f.roots(multiplicities=False)]
                 if len(rts) == 0:
+                    print(&quot;WRONG BIT LENGTH&quot;)
                     wrong_bitlen = True
-                    continue
+                    break
                 assert len(rts) &gt; 0
                 crt_ins.append(rts)
             crt_mods.append(ell**e)
 
         if wrong_bitlen:
             continue
-        
+    
         for comb in itertools.product(*crt_ins):
-            try:
-                rec_m = crt(list(comb), crt_mods)
-            except:
-                break
+            rec_m = crt(list(comb), crt_mods)
             print(rec_m)
             rec_P = ladder(A24, G, rec_m)
             if rec_P[0]/rec_P[1] == P[0]/P[1]:
                 print(&quot;FOUND!!!&quot;)
                 return rec_m
-        
+    
     assert False, &quot;Didnt work :c&quot;
 
 p = 340824640496360275329125187555879171429601544029719477817787
