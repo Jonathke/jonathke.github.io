@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Jonathan Komada Eriksen - Notes</title> 
+    <!-- Prism.js for syntax highlighting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.25.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.25.0/components/prism-python.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prism-themes/themes/prism-xonokai.css">
+    <!-- marked library for parsing Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- MathJax script for rendering math expressions -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>   
+  <link rel="stylesheet" href="style.css">
+  <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$']]
+      }
+    };
+  </script>
+  
+</head>
+<body style="background-color:#9affcc;">
+  <nav>
+    <script src="navbar.js"></script>
+  </nav>
+  <main>
+    <header>
+      <h1>Adjoints</h1>
+    </header>
+    Something like a <a href="./blog">blog</a>...
+<hr>
+<h2>MonoDOOM ETERNAL - Side-Channel Protection Against the Monodromy Attack</h2>
+<p>For KalmarCTF 2026, I authored a follow up challenge to last year's MonoDOOM challenge. I hope those who tried the challenge learned a thing or two, because I certainly did (see post scriptum)!</p>
+<h3>The challenge</h3>
+<p>The challenge has the description</p>
+<blockquote>
+<p>Rip and tear... until it's done! The only thing monodromies fear... is side-channel protection!</p>
+</blockquote>
+<p>and looking through last year's challenges, it is quickly clear that other than referring to an awesome franchise, this challenge is highly related to the MonoDOOM challenge from KalmarCTF2025.</p>
+<p>This year, it is interactive, so we start by connecting to the server:</p>
+<pre><code class="language-bash">$ ncat --ssl [...].chal-kalmarc.tf 1337
+('b1e358d9bdafbc72c56269379329e68c', 'efb93010a2041330cee24aff87023955')
+Please take good care of the secret above, I need you to deliver it to our allies. It is above your paygrade though...
+HoweverI have a message for you too!
+
+Here is my public key: (140441098042911482163426895887128973732719842578737538800778, 294029213231539075491357202941648706424922564960931606971421)
+blinding: 4145358935069235389406815395531658583086851049473589404475
+Please send yours (format: (X, Z)):
+</code></pre>
+<p>and after sending a public key, we receive:</p>
+<pre><code class="language-bash">('6680a31485ac79dc1d4a5c2e632fe693', '04dd91b5c9b1f81f81bd0806e201c48c')
+Did you get the message? If not, I can send again
+
+Here is my public key: (298513347304774003822039442662653027488911176244008624348752, 17855936106070861286604791052647026409466873185079499530766)
+blinding: 42558627995817142421058408846544713046200363807922418478261
+Please send yours (format: (X, Z)):
+</code></pre>
+<p>and this loop continues...</p>
+<p>We open the chal.py file, and looking at last years challenge script, we see that essentially only the main function has changed:</p>
+<pre><code class="language-python">#^lines above are same as last year...
+def encrypt(shared_secret, msg):
+    sha1 = hashlib.sha1()
+    sha1.update(str(shared_secret).encode('ascii'))
+    key = sha1.digest()[:16]
+    iv = os.urandom(16)
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    ciphertext = cipher.encrypt(pad(msg, 16))
+    return iv.hex(), ciphertext.hex()
+
+FLAG = b&quot;kalmar{???}&quot;
+
+def main():
+    p = 340824640496360275329125187555879171429601544029719477817787
+    F = GF(p)
+    A = F(285261811835788437932082156343256480312664037202203048186662)
+    ord_G = 42603080062045034416140648444405950943345472415479119301079
+
+    G = (F(2024), F(1))
+
+    s_A = secrets.randbelow(ord_G)
+    print(f&quot;{encrypt(s_A, FLAG)}&quot;)
+    print(f&quot;Please take good care of the secret above, I need you to deliver it to our allies. It is above your paygrade though...&quot;)
+    print(f&quot;HoweverI have a message for you too!&quot;) 
+
+    msg = b&quot;attack at dawn&quot;
+    while True:
+        #I won't screw up again! Better include some state of the art side channel protection 8)
+        #I'll even use TWO countermeasures from https://schaumont.dyn.wpi.edu/schaum/pdf/papers/2010hostf.pdf
+
+        #Step 1: blinding!
+        blind = randint(1, ord_G)
+        s_A_protected = s_A*blind
+
+        #Step 2: Add multiple of order!
+        s_A_protected += secrets.randbelow(2**64)*ord_G
+
+        #BWAHAHA good luck now!!
+
+        _, p_A = keygen(A, G, ord_G, s=s_A_protected)
+        print(f&quot;\nHere is my public key: {p_A}&quot;)
+        print(f&quot;blinding: {blind}&quot;)
+
+        print(&quot;Please send yours (format: (X, Z)):&quot;)
+        answer = literal_eval(sys.stdin.readline().strip())
+        p_B = tuple([F(c) for c in answer])
+
+        ss = derive_secret(A, p_B, s_A_protected)
+        iv, ct = encrypt(ss, msg)
+        print(f&quot;{(iv, ct)}&quot;)
+        print(f&quot;Did you get the message? If not, I can send again&quot;)
+
+if __name__ == &quot;__main__&quot;: 
+    main()
+</code></pre>
+<p>Thus, the setup is slightly different this year:</p>
+<ul>
+<li>We have the flag, encrypted using the servers (long-term) private key $s_A$.</li>
+<li>We can interact with the server, to do a DH-style key exchange, where the server uses some kind of masked version of their private key. Specifically, for each interaction, the key used by the server is $$s_{A, i}' := s_Ab_i + r_i\ell,$$ where $\ell$ is the order of the generator $G$, and $b_i$ is a random integer less than $\ell$, and $r_i$ is a random $64$-bit integer. Importantly, we also get $b_i$ for some inexplicable reason.</li>
+</ul>
+<p>Looking a bit (but not too much...) into the SoK paper mentioned in the comment, we see that both different forms of blinding, and adding a large multiple of the order, are typical countermeasures for side-channel attacks. Thus part of the protection makes sense, and is even quite conservative: $64$-bits one of the larger choices considered in the paper. But, clearly the so-called &quot;blinding&quot; seems to be non-sensical (let's put it on a misunderstanding by the implementor), so this seems suspicious.</p>
+<h3>Recap from last year</h3>
+<p>Last year's challenge showed (what at least I think is) an incredibly cool side-channel attack - the &quot;monodromy-attack&quot;. It seems like this year, it is back, but now with some added side-channel protection to make the attack harder.</p>
+<p>For a quick refresher, I recommend checking out <a href="https://jonathke.github.io/monoDOOM">last year's writeup</a>, as the rest of this writeup assumes you read the previous one. In case you like to rebel, and not follow this recommendation, the TL;DR is: given a projective coordinate leak on $[m]G$, computed with the montgomery ladder, the attack reduces the ECDLP-problem on $E/\mathbb{F}_p$, to instead solving three DLPs in $\mathbb{F}_p^\times$, and then recovering $m$ as the solution to a quadratic equation modulo $p-1$<sup><a href="#footnote2">[1]</a></sup>.</p>
+<h3>The limitation of the attack</h3>
+<p>The way the attack works, gives it an obvious limitation as well: from the projective coordinate leak on $[m]G$, the best we could possibly hope for is to recover $m \pmod{p-1}$, based on what we reduced it to. However, recall that the value we really are interested in, is $m \pmod{\ell}$. Now, by assumption<sup><a href="#footnote2">[1]</a></sup>, $\ell$ is coprime to $p-1$, so if the size of the integer $m$ used to compute $[m]G$ is greater than $\ell(p-1)$, so we can convince ourselves that this alone gives us information-theoretically no information on the value $m \mod{\ell}$. This is indeed the case for the values $s_{A,i}'$, and thus the monodromy attack alone gives no hope of recovering $s_{A,i}' \pmod{\ell}$.</p>
+<h3>The trick - The $s_{A,i}'$ are biased</h3>
+<p>However, we can notice that based on the way they are computed, there is actually a strong bias in $s_{A,i}' \pmod{p-1}$, relative to $s_A$. Indeed, since we know the blinding value, we are only using the $64$-bits of randomness when sampling $r_i$.</p>
+<p>After sampling $n$ keys, and performing the monodromy attack on all these public keys, we have equations of the form $$s_{A,i}' \equiv s_Ab_i + r_i\ell \pmod{p-1}\tag{1}$$ for unknown $r_i &lt; 2^{64}$, and $s_A$. Many CTF-aficionados will here quickly spot that this is an instance of the <a href="https://link.springer.com/chapter/10.1007/3-540-68697-5_11">(generalized) hidden-number problem</a>! Famously, this problem is (often) solvable by lattice-reduction; a great paper to see this in practice (and with real-world consequences!) is <a href="https://eprint.iacr.org/2019/023.pdf">eprint/2019/023</a></p>
+<p>To summarize: we can rewrite the equations to the form in the paper above
+$$\begin{equation}x_i - t_iy + a_i \equiv 0 \mod{q},\end{equation}$$
+by setting $x_i := r_i, t_i := -b_i\ell^{-1}$ and $a_i := -s_{A, i}'\ell^{-1}$, everything modulo $q$, where $q := p-1$ (again, remember that $\ell$ is assumed coprime to $p-1$, so the inverse makes sense). Set $B = 2^{64}$, and notice then that that the lattice spanned by the rows of
+$$M := \begin{pmatrix}q &amp; 0 &amp; \dots &amp; 0 &amp; 0 &amp; 0\\
+0 &amp; q &amp; \dots &amp; 0 &amp; 0 &amp; 0\\
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots &amp; \vdots &amp; \vdots \\
+0 &amp; 0 &amp; \dots &amp; q &amp; 0 &amp; 0\\
+t_1 &amp; t_2 &amp; \dots &amp; t_n &amp; B/q &amp; 0 \\
+a_1 &amp; a_2 &amp; \dots &amp; a_n &amp; 0 &amp; B
+\end{pmatrix}$$
+contains the vector
+$$v := [z_1, \dots, z_n, y, 1]M = [x_1, x_2, \dots, x_n, yB/q, B]$$
+(the values $z_i$ here are just the multiple of $q$ that is required to lift eq. $(1)$ to the integers). The gaussian heuristic says that, assuming the lattice above behaves like a random lattice, the shortest vector (using $n=2$, and $q$ and $B$ as explained) is expected to be around size
+$$\sqrt{\frac{\dim{M}}{2\pi e}} \det(M)^{1/\dim{M}} \approx 2^{80}.$$
+However, by assumption, we have $x_i &lt; B$, and thus
+$$||v|| &lt; \sqrt{4} \cdot B = 2^{65},$$
+making this vector is particularly short, and thus it is expected to occur as one of the shortest vectors in the lattice. Thus, by lattice reduction, we are able to recover $y := s_A \pmod{p-1}$, but since $s_A &lt; \ell &lt; p-1$, this recovers $s_A$ on the money.</p>
+<h3>Full solve</h3>
+<p>We now have essentially everything we need. We design the attack by:</p>
+<ul>
+<li>Gather 2 public-keys by interaction</li>
+<li>Adapt last years monodromy-attack solution to return ALL possible roots of the quadratic equation.</li>
+<li>For each guess of the values $s_{A, i}' \pmod{p-1}$, try to solve the related HNP.</li>
+<li>(Optional: Betray whoever the server is representing, for not trusting us with the flag to begin with.)</li>
+</ul>
+<p>A version that works (though is a bit buggy, but I couldn't be bothered to debug it fully, so you might have to run it a few times...) is</p>
+<pre><code class="language-python">#!/usr/bin/env python3
+from sage.all import *
+from pwn import process, context, remote
+from ast import literal_eval
+
+from chal import ladder, double, derive_secret
+import itertools
+
+import hashlib
+import os
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+
+# this is the correct differential addition from the cubical torsor point of view
+def cubical_diff_add(P, Q, PmQ):
+    XP, ZP = P
+    XQ, ZQ = Q
+    XPmQ, ZPmQ = PmQ
+    a=XP+ZP
+    b=XP-ZP
+    c=XQ+ZQ
+    d=XQ-ZQ
+    da = d*a
+    cb = c*b
+    dapcb = da+cb
+    damcb = da-cb
+    XPQ=dapcb*dapcb / XPmQ
+    ZPQ=damcb*damcb / ZPmQ
+    return (XPQ/4, ZPQ/4)
+
+# the cubical ladder will be used to compute our canonical lift
+def cubical_ladder(A24, P, n):
+    n = abs(n)
+    P1, P2 = (1, 0), P
+    if n == 0:
+        return P1, P2
+    for bit in bin(n)[2:]:
+        Q = cubical_diff_add(P2, P1, P)
+        if bit == &quot;1&quot;:
+            P2 = double(A24, P2)
+            P1 = Q
+        else:
+            P1 = double(A24, P1)
+            P2 = Q
+    return P1
+
+def ratio(P, Q):
+    XP, ZP = P
+    XQ, ZQ = Q
+    if XP == 0:
+        assert XQ == 0
+        return (ZQ/ZP)
+    else:
+        l=XQ/XP
+        assert (ZQ == l*ZP)
+        return l
+
+def monodromy_atk(F, ord_G, A, G, P):
+    p = F.characteristic()
+    A24=(A+2)/4
+
+    xG = G[0]
+
+    u = crt([0,1], [p-1, ord_G])
+    Gthilde = cubical_ladder(A24, G, u) # &quot;Canonical lift&quot;
+    Pthilde = cubical_ladder(A24, P, u) # &quot;Canonical lift&quot;
+
+    l1 = ratio(Gthilde, G)
+    l2 = ratio(Pthilde, P)
+
+    zeta = F.multiplicative_generator()
+    print(&quot;Solving dlogs&quot;)
+    print(factor(p-1))
+    #dlp_x = Mod((4*xG).log(zeta),p-1)
+    dlp_x = (4*xG).log(zeta)
+    print(&quot;Done&quot;)
+    dlp_l2 = Mod(l2.log(zeta),p-1)
+    print(&quot;Done&quot;)
+    dlp_l1 = Mod(l1.log(zeta),p-1)
+    print(&quot;Done&quot;)
+
+    for l in range(2*195+20, 1, -1):
+        print(f&quot;Trying bitlength l = {l}&quot;)
+
+        #assert dlp_x*m*(2**l-m)+dlp_l1*m**2 == dlp_l2
+
+        crt_mods = []
+        crt_ins = []
+
+        wrong_bitlen = False
+        for ell, e in factor(p-1):
+            print(f&quot;Doing factor: {ell, e}&quot;)
+            R = Integers(ell**e)[&quot;X&quot;]
+            X=R.gen()
+            
+            f = X**2*(dlp_l1-dlp_x)+2**l*dlp_x*X - dlp_l2
+            #print(ell, e)
+            #print(dlp_l1, dlp_x, dlp_l2)
+            if f.degree() == -1:
+                crt_ins.append([Integer(a) for a in range(ell**e)])
+            else:
+                rts = [Integer(r) for r in f.roots(multiplicities=False)]
+                if len(rts) == 0:
+                    print(&quot;WRONG BIT LENGTH&quot;)
+                    wrong_bitlen = True
+                    break
+                assert len(rts) &gt; 0
+                crt_ins.append(rts)
+            crt_mods.append(ell**e)
+
+        if wrong_bitlen:
+            continue
+
+        print(&quot;(Probably) right bit length!&quot;)
+       
+        pos_keys = []
+        for comb in itertools.product(*crt_ins):
+            try:
+                rec_m = crt(list(comb), crt_mods)
+            except:
+                break
+            #print(rec_m)
+            pos_keys.append(rec_m)
+        
+        return pos_keys
+
+def hnp_solver(t_list, a_list, q, bound_x):
+    n = len(t_list)
+    B = Matrix(QQ, n + 2, n + 2)
+
+    for i in range(n):
+        B[i, i] = q
+    for i in range(n):
+        B[n, i] = t_list[i]
+    for i in range(n):
+        B[n+1, i] = a_list[i]
+
+    B[n, n] = QQ(bound_x)/QQ(q)
+    B[n+1, n+1] = bound_x
+    
+    # LLL reduction
+    B_lll = B.LLL()
+
+    pos_solutions = []
+    for row in B_lll.rows():
+        vec = list(row)
+        if abs(vec[-1]) != bound_x:
+            continue
+        if vec[-1] &lt; 0:
+            vec = [-c for c in vec]
+        x_candidates = vec[:n]
+        if all(abs(x) &lt;= bound_x for x in x_candidates):
+            pos_solutions.append((-vec[-2]*QQ(q)/QQ(bound_x)) % q)
+
+    return pos_solutions
+
+
+def find_sol(a_vals, b_list, ell, q, bound):
+    a_vals = [ZZ(a) for a in a_vals]
+    b_list = [ZZ(b) for b in b_list]
+    ell_inv = inverse_mod(ell, q)
+    a_list = [(-ell_inv*a) % q for a in a_vals]
+    t_list = [(-ell_inv*b_i) % q for b_i in b_list]
+
+    return hnp_solver(t_list, a_list, q, bound)
+
+
+context.log_level = &quot;debug&quot;
+LOCAL = True
+
+def main():
+    if LOCAL:
+        r = process([&quot;sage&quot;, &quot;chal.py&quot;])
+    else:
+        r = remote(&quot;xxx.yyy.zz&quot;, &quot;123&quot;)
+
+    p = 340824640496360275329125187555879171429601544029719477817787
+    F = GF(p)
+    A = F(285261811835788437932082156343256480312664037202203048186662)
+            
+    G = (F(2024), F(1))
+    ord_G = 42603080062045034416140648444405950943345472415479119301079
+
+    enc_flag = literal_eval(r.recvline().decode())
+
+    r.recvuntil(&quot;key: &quot;)
+    answer = r.recvline().decode()
+    p_A1 = tuple([F(c) for c in literal_eval(answer)])
+    r.recvuntil(&quot;blinding: &quot;)
+    answer = r.recvline().decode()
+    b1 = literal_eval(answer)
+
+    r.recvuntil(&quot;(format: (X, Z)):&quot;)
+    r.sendline(&quot;(123,1)&quot;)
+    r.recvuntil(&quot;key: &quot;)
+    answer = literal_eval(r.recvline().decode())
+    p_A2 = tuple([F(c) for c in answer])
+    r.recvuntil(&quot;blinding: &quot;)
+    answer = r.recvline().decode()
+    b2 = literal_eval(answer)
+
+    r.close()
+
+    pos_keys_1 = [ZZ(k) for k in monodromy_atk(F, ord_G, A, G, p_A1)]
+    pos_keys_2 = [ZZ(k) for k in monodromy_atk(F, ord_G, A, G, p_A2)]
+
+    bs = [b1, b2]
+
+    from tqdm import tqdm
+    for x1 in tqdm(pos_keys_1):
+        for x2 in pos_keys_2:
+            res = find_sol([x1, x2], bs, ord_G, ZZ(p-1), 2**64)
+            if res:
+                iv, ct = enc_flag
+                for sol in res:
+                    sha1 = hashlib.sha1()
+                    sha1.update(str(sol).encode('ascii'))
+                    key = sha1.digest()[:16]
+                    cipher = AES.new(key, AES.MODE_CBC, bytes.fromhex(iv))
+                    print(cipher.decrypt(bytes.fromhex(ct)), 16)
+
+                return
+    
+
+if __name__ == &quot;__main__&quot;:
+    main()
+</code></pre>
+<p>which after running for a few minutes finds a flag and some heavy tunes</p>
+<pre><code>kalmar{check_out_\m/----&gt;https://www.youtube.com/watch?v=mmVaLyyU8gk}
+</code></pre>
+<p>Another cool DOOM-song cover is <a href="https://www.youtube.com/watch?v=dn0T3s8SMQ8&list=RDdn0T3s8SMQ8&start_radio=1">this one</a>, but of course, the other one matched the title of this challenge better.</a></p>
+<h3>Thanks:</h3>
+<p>Thanks to Frederik Vercauteren for several helpful discussions on the effectiveness of side-channel countermeasures against the monodromy attack. In particular, he was the first ask if using lattice reduction could be helpful to counter certain countermeasures, so this challenge definitely owes a lot to him!</p>
+<h2>PS! A not-so-random lattice</h2>
+<p>Admittedly, the setup with the blinding factor is quite artificial. At the risk of revealing my own foolishness, I also wanted to share another thing related to the challenge, which is probably already extremely obvious to some people. In retrospect, it is indeed pretty obvious, but as I learned something, maybe someone else will too:</p>
+<p>The original idea for this challenge was to have it with ONLY the part about adding a large multiple of the order, which I naïvely thought would work the same. Following the argumentation above, nothing really changes if the &quot;protected&quot; keys are instead only defined as
+$$s_{A,i}' := s_A + r_i\ell,$$
+except in the matrix $M$, we see that all the values $t_i$ are all the same, satisfying $t_i := -\ell \mod{q}$. The Gaussian heuristic still says that we should find the solution vector via lattice reduction, but running the same attack doesn't work: trying it gives way shorter basis vectors.</p>
+<p>In other words, the Gaussian heuristic fails miserably; our lattice is no longer sufficiently random. And luckily, there is actually a very easy and clean argument for why this approach is doomed to fail. Let us now call $k_i := s_{A,i}' \mod{p-1}$ (i.e. the values that the monodromy attack recovers). We can thus collect equations of the form
+$$ k_i \equiv s_A + r_i\ell \pmod{p-1}.$$
+By elementary linear algebra, we can fix a guess for $r_0$, which determines $s_A$ and the other $r_j$. Of course, this was true before as well, but then the key was that we could additionally exploit the bound on the $r_i$, to recover the real solution with lattice reduction.
+<strong>This fails now:</strong> to see this, notice that for equation $j &gt; 0$, we can always subtract the $0$-th equation, which gives
+$$ (k_j - k_0) \equiv (r_j - r_0)\ell \pmod{p-1}$$
+Since $r_i \ll p-1$, we can actually know the exact value of $r_j - r_0$ over the integers as well. Set $\delta_j$ to be the integer in the range $[-(p-1)/2, (p-1)/2]$ which represents the value $(k_j - k_0)\ell^{-1} \pmod{p-1}$, and notice that we then have $$r_j - r_0 = \delta_j$$ over the integers. Since we have the requirement $0 \leq r_j \leq B$, this requirement turns into $0 \leq \delta_j - r_0 \leq B$, and thus we can only bound $r_0$ by $$\max(\{\delta_i\}_i) - B \leq r_0 \leq \min(\{\delta_i\}_i)$$ and importantly, notice that any choice of $r_0$ in this range (and of course still $0 \leq r_0 \leq B$, if this is not already implied by the $\delta_i$'s) still solves the equation with our bound-constraint on the $r_i$. In practice, this could be used to gain a small constant factor for improving on bruteforcing by sampling a few $k_i$, but asymptotically, this clearly gives no benefit over simply bruteforcing $r_0$ in the bound to begin with.</p>
+<p>Thus, I have to admit that the adding a random multiple of the order was a better side-channel protection (against the monodromy attack), than what I initially realised! Though, it should probably be mentioned that the best countermeasure is still probably, as Damien also wrote in the original paper, randomizing the projective representation of the initial generator point; this is essentially free (as opposed to adding a large multiple of the order, which obviously increases the size of the ladder used to compute $[m]G$), while also completely killing any information gained by a projective coordinate leak.</p>
+<hr>
+<p id="footnote1"><sup>[1]:Does this remind you of the famous MOV-attack? If so, that is probably an astute observation: the monodromy attack is based on what Damien calls "cubical arithmetic", which can also be used to compute pairings, see <a href="https://hal.science/hal-04848028/document">the original paper by Damien</a>, or the <a href="https://inria.hal.science/hal-05142445/file/simpler-and-faster.pdf">the follow-up paper</a>, which contains more explicit algorithms and less scary math.</sup></p>
+<p id="footnote2"><sup>[2]:Otherwise, note that the usual MOV-attack already reduces the ECDLP to a finite-field DLP.</sup></p>
+</main>
+</body>
+</html>
